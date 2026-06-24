@@ -28,15 +28,17 @@ interface Args {
   strategy?: StrategyName;
   csv?: string;
   json: boolean;
+  allTrades: boolean;
 }
 
 function parseArgs(argv: string[]): Args {
-  const out: Args = { json: false };
+  const out: Args = { json: false, allTrades: false };
   const positional: string[] = [];
 
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--json") out.json = true;
+    else if (a === "--trades" || a === "--all" || a === "--full") out.allTrades = true;
     else if (a === "--bars") out.bars = Number(argv[++i]);
     else if (a === "--grade") out.grade = argv[++i] as SetupGrade;
     else if (a === "--interval") out.interval = argv[++i];
@@ -59,10 +61,18 @@ function parseArgs(argv: string[]): Args {
       out.interval ??= upper === "D" || upper === "W" || upper === "M" ? upper : p;
     } else if (p.toLowerCase().endsWith(".csv")) {
       out.csv ??= p;
+    } else if (["trades", "all", "full"].includes(p.toLowerCase())) {
+      out.allTrades = true;
     }
   }
 
   return out;
+}
+
+function fmtDuration(seconds: number): string {
+  const days = seconds / 86400;
+  if (days >= 2) return `${days.toFixed(1)}d`;
+  return `${Math.round(seconds / 3600)}h`;
 }
 
 async function main() {
@@ -116,17 +126,29 @@ async function main() {
   ];
   for (const [k, v] of rows) console.log(k.padEnd(22) + v);
 
-  console.log("\nLast trades:");
-  for (const t of r.trades.slice(-8)) {
+  if (r.totalTrades === 0) {
+    console.log("\n(no trades — try a longer window, a lower grade, or check the data source.)");
+    return;
+  }
+
+  const shown = args.allTrades ? r.trades : r.trades.slice(-8);
+  console.log(`\n${args.allTrades ? "All" : "Last"} trades (${shown.length} of ${r.trades.length}):`);
+  console.log(
+    "  #  Entry              Held    Result   P&L           P&L%       R   Exit",
+  );
+  console.log("  " + "─".repeat(72));
+  shown.forEach((t, idx) => {
+    const i = args.allTrades ? idx + 1 : r.trades.length - shown.length + idx + 1;
     const tag = t.pnl >= 0 ? "WIN " : "LOSS";
     console.log(
-      `  ${fmtDateTime(t.entryTime)}  ${t.grade.padEnd(2)} ${tag} ` +
-        `entry ${fmtNum(t.entry)} exit ${fmtNum(t.exit)} (${t.outcome}) ` +
-        `${fmtUsd(t.pnl)} ${fmtNum(t.r)}R`,
+      `${String(i).padStart(3)}  ${fmtDateTime(t.entryTime)}  ` +
+        `${fmtDuration(t.exitTime - t.entryTime).padStart(5)}   ${tag}  ` +
+        `${fmtUsd(t.pnl).padStart(11)}  ${fmtPct(t.returnPct).padStart(7)}  ` +
+        `${fmtNum(t.r).padStart(5)}   ${t.outcome}`,
     );
-  }
-  if (r.totalTrades === 0) {
-    console.log("  (no trades — try a longer window, a lower grade, or check the data source.)");
+  });
+  if (!args.allTrades) {
+    console.log(`\n  (add 'trades' to the command to see all ${r.trades.length})`);
   }
 }
 
