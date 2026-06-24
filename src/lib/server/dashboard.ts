@@ -49,6 +49,7 @@ export async function buildStatus(): Promise<StatusResponse> {
     },
     position: state.position,
     config: {
+      strategy: cfg.strategy,
       riskPerTrade: cfg.riskPerTrade,
       riskReward: cfg.riskReward,
       minGrade: cfg.minGrade,

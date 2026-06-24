@@ -15,6 +15,11 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     quoteCurrency: "USDT",
     primaryInterval: "240",
     contextInterval: "D",
+    strategy: "sr",
+    donchianN: 20,
+    trendMaPeriod: 50,
+    atrPeriod: 14,
+    atrMult: 3,
     startingBalance: 10_000,
     feeRate: 0.001,
     riskPerTrade: 0.01,
@@ -80,6 +85,42 @@ export function buildBounceSeries(opts?: {
   const low = S - S * 0.0005;
   const close = S * 1.012;
   candles.push(candle(endTime, S * 1.002, S * 1.013, low, close));
+  return candles;
+}
+
+/**
+ * Build a steadily rising series with noise so breakouts fire and the trend
+ * filter passes — used to exercise the trend-following strategy.
+ */
+export function buildTrendSeries(opts?: {
+  n?: number;
+  start?: number;
+  driftPerBar?: number;
+  intervalSec?: number;
+}): Candle[] {
+  const n = opts?.n ?? 300;
+  const start = opts?.start ?? 10_000;
+  const drift = opts?.driftPerBar ?? 0.004;
+  const step = opts?.intervalSec ?? 240 * 60;
+  const endTime = Math.floor(Date.now() / 1000) - step;
+  const startTime = endTime - n * step;
+
+  let seed = 987654321;
+  const rnd = () => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed / 0x7fffffff;
+  };
+
+  const candles: Candle[] = [];
+  let price = start;
+  for (let i = 0; i < n; i++) {
+    const open = i ? candles[i - 1].close : price * 0.999;
+    price = price * (1 + drift + (rnd() - 0.5) * 0.01);
+    const close = price;
+    const high = Math.max(open, close) * (1 + 0.003 * rnd());
+    const low = Math.min(open, close) * (1 - 0.003 * rnd());
+    candles.push(candle(startTime + i * step, open, high, low, close));
+  }
   return candles;
 }
 

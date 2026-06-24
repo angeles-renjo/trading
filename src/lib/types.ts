@@ -63,13 +63,16 @@ export interface TradePlan {
   grade: SetupGrade;
   entry: number;
   stop: number;
-  target: number;
-  /** reward : risk, e.g. 2 means target is 2x as far as the stop. */
+  /** Fixed take-profit, or null for strategies that trail (let winners run). */
+  target: number | null;
+  /** reward : risk for a fixed target; 0 when the exit is a trailing stop. */
   riskReward: number;
   /** Human-readable explanation of why this setup qualified. */
   reason: string;
-  /** The support zone the price is reacting to. */
-  zone: Zone;
+  /** Which strategy produced this plan. */
+  strategy: string;
+  /** The support zone the price is reacting to (S/R strategy only). */
+  zone?: Zone;
 }
 
 export type Side = "buy" | "sell";
@@ -97,7 +100,8 @@ export interface Position {
   quantity: number;
   avgPrice: number;
   stop: number;
-  target: number;
+  /** Fixed take-profit, or null when the exit is a trailing stop. */
+  target: number | null;
   /** Fee paid on entry, used to compute net realised P&L on exit. */
   entryFee: number;
   openedAt: number;

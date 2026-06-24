@@ -1,22 +1,18 @@
 import type { AppConfig } from "../config";
 import type { Candle, TradePlan, Zone } from "../types";
 import { detectZones } from "./support-resistance";
-import { detectSetup, type SetupParams } from "./setup";
+import type { Strategy } from "./strategy";
+import { SRStrategy } from "./sr-strategy";
+import { TrendStrategy } from "./trend-strategy";
 
 export * from "./support-resistance";
 export * from "./setup";
+export * from "./strategy";
+export { setupParamsFromConfig } from "./params";
 
-/** Build setup params from app config. */
-export function setupParamsFromConfig(cfg: AppConfig): SetupParams {
-  return {
-    symbol: cfg.symbol,
-    pivotLookback: cfg.pivotLookback,
-    zoneWidthPct: cfg.zoneWidthPct,
-    minTouches: cfg.minTouches,
-    riskReward: cfg.riskReward,
-    minStrengthAPlus: cfg.minStrengthAPlus,
-    minStopPct: cfg.minStopPct,
-  };
+/** Resolve the configured strategy. */
+export function getStrategy(cfg: AppConfig): Strategy {
+  return cfg.strategy === "sr" ? new SRStrategy() : new TrendStrategy();
 }
 
 export interface Analysis {
@@ -24,13 +20,16 @@ export interface Analysis {
   plan: TradePlan | null;
 }
 
-/** One-shot analysis used by the bot loop and the dashboard. */
+/**
+ * One-shot analysis for the bot loop and dashboard. S/R zones are always
+ * computed (useful chart context), and the active strategy supplies the plan.
+ */
 export function analyze(candles: Candle[], cfg: AppConfig): Analysis {
   const zones = detectZones(candles, {
     pivotLookback: cfg.pivotLookback,
     zoneWidthPct: cfg.zoneWidthPct,
     minTouches: cfg.minTouches,
   });
-  const plan = detectSetup(candles, setupParamsFromConfig(cfg));
+  const plan = getStrategy(cfg).evaluateEntry(candles, cfg);
   return { zones, plan };
 }

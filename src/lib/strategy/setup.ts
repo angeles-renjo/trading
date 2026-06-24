@@ -100,6 +100,7 @@ export function detectSetup(candles: Candle[], p: SetupParams): TradePlan | null
     target,
     riskReward: rr,
     reason,
+    strategy: "sr",
     zone: support,
   };
 }

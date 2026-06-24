@@ -57,6 +57,7 @@ export default function Dashboard() {
             <Badge tone="up">paper</Badge>
           )}
           <Badge tone="neutral">data: {data.marketDataSource}</Badge>
+          <Badge tone="neutral">strategy: {data.config.strategy}</Badge>
           {a.halted && <Badge tone="warn">⏸ halted</Badge>}
         </div>
         <div className="flex items-center gap-2">
@@ -193,7 +194,10 @@ export default function Dashboard() {
 function PositionOrSetup({ data }: { data: StatusResponse }) {
   const pos = data.position;
   if (pos) {
-    const pct = Math.max(0, Math.min(1, (data.price - pos.stop) / (pos.target - pos.stop)));
+    const hasTarget = pos.target != null;
+    const pct = hasTarget
+      ? Math.max(0, Math.min(1, (data.price - pos.stop) / (pos.target! - pos.stop)))
+      : 0;
     return (
       <Panel title="Open position">
         <div className="space-y-3 text-sm">
@@ -206,23 +210,30 @@ function PositionOrSetup({ data }: { data: StatusResponse }) {
             <span className="tabular">{fmtUsd(pos.avgPrice)}</span>
           </div>
           <div className="flex justify-between">
-            <span className="text-down">Stop</span>
+            <span className="text-down">Stop {hasTarget ? "" : "(trailing)"}</span>
             <span className="tabular text-down">{fmtUsd(pos.stop)}</span>
           </div>
           <div className="flex justify-between">
             <span className="text-up">Target</span>
-            <span className="tabular text-up">{fmtUsd(pos.target)}</span>
+            <span className="tabular text-up">{hasTarget ? fmtUsd(pos.target!) : "Trailing"}</span>
           </div>
-          <div className="pt-1">
-            <div className="h-2 w-full overflow-hidden rounded bg-down/30">
-              <div className="h-full bg-up" style={{ width: `${pct * 100}%` }} />
+          {hasTarget ? (
+            <div className="pt-1">
+              <div className="h-2 w-full overflow-hidden rounded bg-down/30">
+                <div className="h-full bg-up" style={{ width: `${pct * 100}%` }} />
+              </div>
+              <div className="mt-1 flex justify-between text-xs text-gray-500">
+                <span>stop</span>
+                <span>now {fmtUsd(data.price)}</span>
+                <span>target</span>
+              </div>
             </div>
-            <div className="mt-1 flex justify-between text-xs text-gray-500">
-              <span>stop</span>
-              <span>now {fmtUsd(data.price)}</span>
-              <span>target</span>
+          ) : (
+            <div className="pt-1 text-xs text-gray-500">
+              Riding the trend — exits when price closes back to the trailing stop.
+              Now {fmtUsd(data.price)}.
             </div>
-          </div>
+          )}
         </div>
       </Panel>
     );
@@ -235,12 +246,18 @@ function PositionOrSetup({ data }: { data: StatusResponse }) {
         <div className="space-y-3 text-sm">
           <div className="flex items-center gap-2">
             <Badge tone={gradeTone(plan.grade)}>{plan.grade} setup</Badge>
-            <span className="text-gray-400">{plan.riskReward}:1 reward:risk</span>
+            <span className="text-gray-400">
+              {plan.target != null ? `${plan.riskReward}:1 reward:risk` : "trailing-stop exit"}
+            </span>
           </div>
           <div className="grid grid-cols-3 gap-2 text-center">
             <Box label="Entry" value={fmtUsd(plan.entry)} tone="neutral" />
             <Box label="Stop" value={fmtUsd(plan.stop)} tone="down" />
-            <Box label="Target" value={fmtUsd(plan.target)} tone="up" />
+            <Box
+              label="Target"
+              value={plan.target != null ? fmtUsd(plan.target) : "Trail"}
+              tone="up"
+            />
           </div>
           <p className="text-xs leading-relaxed text-gray-400">{plan.reason}</p>
           <p className="text-xs text-gray-600">

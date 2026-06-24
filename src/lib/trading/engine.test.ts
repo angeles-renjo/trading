@@ -32,10 +32,10 @@ describe("TradingEngine (paper) full cycle", () => {
     expect(afterEntry.fills.filter((f) => f.reason === "entry")).toHaveLength(1);
     const pos = afterEntry.position!;
     expect(pos.stop).toBeLessThan(pos.avgPrice);
-    expect(pos.target).toBeGreaterThan(pos.avgPrice);
+    expect(pos.target!).toBeGreaterThan(pos.avgPrice);
 
     // 2) Price drifts up to the target -> exit.
-    md.price = pos.target + 1;
+    md.price = pos.target! + 1;
     const exit = await engine.tick();
     expect(exit.action).toBe("exited");
 

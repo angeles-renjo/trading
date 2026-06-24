@@ -48,6 +48,7 @@ async function main() {
   const span = `${fmtDateTime(r.from)} → ${fmtDateTime(r.to)} (${r.bars} ${interval} candles)`;
   const rows: Array<[string, string]> = [
     ["Symbol / source", `${cfg.symbol} / ${csv ? "csv" : cfg.marketDataSource}`],
+    ["Strategy", r.strategy],
     ["Period", span],
     ["Grade filter", `${grade}+`],
     ["Starting balance", fmtUsd(r.startingBalance)],

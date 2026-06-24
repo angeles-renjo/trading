@@ -2,18 +2,19 @@ import type { AppConfig } from "../config";
 import type { Broker, MarketDataProvider, OrderRequest } from "../exchange/types";
 import type { Storage } from "../storage/file-store";
 import type { Notifier, BotEvent } from "../notify/types";
-import type { AccountState, TradePlan } from "../types";
-import { analyze, gradeAtLeast } from "../strategy";
+import type { AccountState, Candle, TradePlan } from "../types";
+import { getStrategy, gradeAtLeast } from "../strategy";
 import { intervalToSeconds } from "../exchange/interval";
 import { sizePosition, entryGate } from "./risk";
 import { recordEntry, recordExit, rolloverDay, valueAccount } from "./account";
 
 // ---------------------------------------------------------------------------
 // The trading engine. One `tick()` is one decision cycle:
-//   - if a position is open: check stop/target and exit if hit
-//   - if flat: run the strategy, gate it (risk limits), size it, and enter
-// It is broker-agnostic: paper and live behave identically here, and the live
-// broker makes order execution safe (exchange stop on entry, idempotent exits).
+//   - position open: exit on stop/target, otherwise trail the stop if the
+//     strategy supports it (let winners run)
+//   - flat: gate (risk limits), ask the strategy for an entry, size it, enter
+// Broker-agnostic: paper and live behave identically; the live broker makes
+// order execution safe.
 // ---------------------------------------------------------------------------
 
 const HISTORY_BARS = 400;
@@ -49,7 +50,7 @@ export class TradingEngine {
 
     let result: TickResult;
     if (state.position) {
-      result = await this.manageOpen(state, price);
+      result = await this.manageOpen(state, price, nowSec);
     } else {
       result = await this.maybeEnter(state, price, nowSec);
     }
@@ -58,41 +59,71 @@ export class TradingEngine {
     return result;
   }
 
-  private async manageOpen(state: AccountState, price: number): Promise<TickResult> {
-    const { broker } = this.deps;
+  /** Drop the still-forming last candle so we only act on closed bars. */
+  private closed(candles: Candle[], nowSec: number): Candle[] {
+    const step = intervalToSeconds(this.deps.cfg.primaryInterval);
+    if (candles.length && candles[candles.length - 1].time + step > nowSec) {
+      return candles.slice(0, -1);
+    }
+    return candles;
+  }
+
+  private async manageOpen(
+    state: AccountState,
+    price: number,
+    nowSec: number,
+  ): Promise<TickResult> {
+    const { cfg, md, broker } = this.deps;
     const pos = state.position!;
 
     let reason: "stop" | "target" | null = null;
     if (price <= pos.stop) reason = "stop";
-    else if (price >= pos.target) reason = "target";
+    else if (pos.target != null && price >= pos.target) reason = "target";
 
-    if (!reason) {
+    if (reason) {
+      const order = await broker.placeMarketOrder({
+        symbol: pos.symbol,
+        side: "sell",
+        quantity: pos.quantity,
+        reason,
+      });
+      const { realizedPnl } = recordExit(state, order, reason);
+      await this.emit({
+        type: "exit",
+        message: `Exited ${pos.symbol} via ${reason.toUpperCase()} @ ${order.price} — P&L ${realizedPnl >= 0 ? "+" : ""}${realizedPnl}`,
+        time: order.timestamp,
+        data: { reason, price: order.price, realizedPnl, quantity: order.quantity },
+      });
       return {
-        action: "none",
-        price,
-        detail: `holding ${pos.quantity} @ ${pos.avgPrice}; price ${price} within [${pos.stop}, ${pos.target}]`,
+        action: "exited",
+        price: order.price,
+        detail: `Exit (${reason}) @ ${order.price}, realised P&L ${realizedPnl}`,
       };
     }
 
-    const order = await broker.placeMarketOrder({
-      symbol: pos.symbol,
-      side: "sell",
-      quantity: pos.quantity,
-      reason,
-    });
-    const { realizedPnl } = recordExit(state, order, reason);
-
-    await this.emit({
-      type: "exit",
-      message: `Exited ${pos.symbol} via ${reason.toUpperCase()} @ ${order.price} — P&L ${realizedPnl >= 0 ? "+" : ""}${realizedPnl}`,
-      time: order.timestamp,
-      data: { reason, price: order.price, realizedPnl, quantity: order.quantity },
-    });
+    // Trail the stop upward if the strategy supports it.
+    const strat = getStrategy(cfg);
+    if (strat.trailStop) {
+      const candles = this.closed(
+        await md.getHistory(cfg.symbol, cfg.primaryInterval, HISTORY_BARS),
+        nowSec,
+      );
+      const newStop = strat.trailStop(
+        candles,
+        { entryTime: pos.openedAt, entry: pos.avgPrice, stop: pos.stop },
+        cfg,
+      );
+      if (newStop != null && newStop > pos.stop) {
+        const prev = pos.stop;
+        pos.stop = newStop;
+        return { action: "none", price, detail: `holding; trailed stop ${prev} → ${newStop}` };
+      }
+    }
 
     return {
-      action: "exited",
-      price: order.price,
-      detail: `Exit (${reason}) @ ${order.price}, realised P&L ${realizedPnl}`,
+      action: "none",
+      price,
+      detail: `holding ${pos.quantity} @ ${pos.avgPrice}; stop ${pos.stop}${pos.target != null ? `, target ${pos.target}` : " (trailing)"}`,
     };
   }
 
@@ -117,14 +148,11 @@ export class TradingEngine {
       return { action: "blocked", price, detail: gate.reason ?? "entry blocked" };
     }
 
-    const candles = await md.getHistory(cfg.symbol, cfg.primaryInterval, HISTORY_BARS);
-    // Only act on CLOSED candles — drop the last bar if it is still forming.
-    const intervalSec = intervalToSeconds(cfg.primaryInterval);
-    const closed =
-      candles.length && candles[candles.length - 1].time + intervalSec > nowSec
-        ? candles.slice(0, -1)
-        : candles;
-    const { plan } = analyze(closed, cfg);
+    const candles = this.closed(
+      await md.getHistory(cfg.symbol, cfg.primaryInterval, HISTORY_BARS),
+      nowSec,
+    );
+    const plan = getStrategy(cfg).evaluateEntry(candles, cfg);
 
     if (!plan || !gradeAtLeast(plan.grade, cfg.minGrade)) {
       return {
@@ -157,7 +185,7 @@ export class TradingEngine {
       side: "buy",
       quantity: size.quantity,
       stopLoss: plan.stop,
-      takeProfit: plan.target,
+      takeProfit: plan.target ?? undefined,
       reason: "entry",
     };
     const order = await broker.placeMarketOrder(req);
@@ -165,15 +193,15 @@ export class TradingEngine {
 
     await this.emit({
       type: "entry",
-      message: `Entered ${cfg.symbol} ${order.quantity} @ ${order.price} (${plan.grade}) — stop ${plan.stop}, target ${plan.target}`,
+      message: `Entered ${cfg.symbol} ${order.quantity} @ ${order.price} (${plan.strategy} ${plan.grade}) — stop ${plan.stop}${plan.target != null ? `, target ${plan.target}` : " (trailing)"}`,
       time: order.timestamp,
       data: {
+        strategy: plan.strategy,
         grade: plan.grade,
         entry: order.price,
         stop: plan.stop,
         target: plan.target,
         quantity: order.quantity,
-        riskReward: plan.riskReward,
         reason: plan.reason,
         capped: size.capped,
       },
@@ -182,7 +210,7 @@ export class TradingEngine {
     return {
       action: "entered",
       price: order.price,
-      detail: `Entered long ${order.quantity} @ ${order.price} (stop ${plan.stop}, target ${plan.target})`,
+      detail: `Entered long ${order.quantity} @ ${order.price} (stop ${plan.stop}${plan.target != null ? `, target ${plan.target}` : ", trailing"})`,
       plan,
     };
   }

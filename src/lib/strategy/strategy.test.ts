@@ -54,7 +54,7 @@ describe("setup detection", () => {
     expect(plan!.target).toBeGreaterThan(plan!.entry);
     // target is 2x the stop distance
     const risk = plan!.entry - plan!.stop;
-    const reward = plan!.target - plan!.entry;
+    const reward = plan!.target! - plan!.entry;
     expect(reward / risk).toBeCloseTo(2, 1);
   });
 

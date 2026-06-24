@@ -22,7 +22,7 @@ export function recordEntry(
   state: AccountState,
   order: OrderResult,
   stop: number,
-  target: number,
+  target: number | null,
 ): Fill {
   const notional = order.price * order.quantity;
   const fill: Fill = {

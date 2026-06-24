@@ -25,6 +25,7 @@ export interface StatusResponse {
   };
   position: Position | null;
   config: {
+    strategy: string;
     riskPerTrade: number;
     riskReward: number;
     minGrade: string;

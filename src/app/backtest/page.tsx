@@ -123,7 +123,11 @@ function Results({ r, grade }: { r: BacktestResult; grade: string }) {
 
       <Panel
         title="Equity curve"
-        actions={<Badge tone="neutral">{grade}+ · {fmtDateTime(r.from)} → {fmtDateTime(r.to)}</Badge>}
+        actions={
+          <Badge tone="neutral">
+            {r.strategy} · {grade}+ · {fmtDateTime(r.from)} → {fmtDateTime(r.to)}
+          </Badge>
+        }
       >
         <EquityCurve points={r.equityCurve} start={r.startingBalance} />
       </Panel>

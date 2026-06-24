@@ -1,19 +1,19 @@
 import type { AppConfig } from "../config";
 import type { Candle, SetupGrade } from "../types";
-import { detectSetup, gradeAtLeast, setupParamsFromConfig } from "../strategy";
+import { getStrategy, gradeAtLeast } from "../strategy";
 import { sizePosition } from "../trading/risk";
 import { round, roundPrice } from "../num";
 
 // ---------------------------------------------------------------------------
 // Event-driven backtester.
 //
-// Walks the candle series bar by bar. At each closed bar it asks the SAME
-// strategy used live for a setup; on a qualifying grade it enters at that
-// bar's close (executable in practice — the close is known when the bar
-// closes, so this is not lookahead). Open positions are then managed against
-// each subsequent bar's high/low for stop/target. Slippage is not modelled;
-// when a bar straddles both stop and target we assume the stop fills first
-// (conservative).
+// Walks the candle series bar by bar. At each closed bar it asks the configured
+// strategy for an entry; on a qualifying grade it enters at that bar's close
+// (executable in practice — the close is known when the bar closes, so this is
+// not lookahead). Open positions are managed against each subsequent bar's
+// high/low: stop, then fixed target (if any), otherwise the stop is trailed.
+// Slippage is not modelled; a bar straddling both stop and target assumes the
+// stop fills first (conservative). R multiples use the INITIAL stop.
 // ---------------------------------------------------------------------------
 
 export interface BacktestTrade {
@@ -21,15 +21,12 @@ export interface BacktestTrade {
   exitTime: number;
   entry: number;
   exit: number;
-  stop: number;
-  target: number;
+  stop: number; // initial stop
+  target: number | null;
   quantity: number;
   grade: SetupGrade;
-  /** Net P&L after fees, in quote currency. */
   pnl: number;
-  /** pnl / entry notional. */
   returnPct: number;
-  /** Realised reward:risk multiple (pnl / risked amount). */
   r: number;
   outcome: "target" | "stop" | "open";
   barsHeld: number;
@@ -43,6 +40,7 @@ export interface EquityPoint {
 
 export interface BacktestResult {
   symbol: string;
+  strategy: string;
   interval: string;
   from: number;
   to: number;
@@ -60,9 +58,7 @@ export interface BacktestResult {
   profitFactor: number;
   avgWin: number;
   avgLoss: number;
-  /** Expectancy per trade in quote currency. */
   expectancy: number;
-  /** Expectancy per trade in R multiples. */
   avgR: number;
   maxDrawdownPct: number;
   avgBarsHeld: number;
@@ -72,9 +68,7 @@ export interface BacktestResult {
 }
 
 export interface BacktestOptions {
-  /** Only take setups of at least this grade. Defaults to "A+". */
   minGrade?: SetupGrade;
-  /** Bars to skip before trading (let zones form). */
   warmup?: number;
 }
 
@@ -82,8 +76,9 @@ interface OpenPosition {
   entryTime: number;
   entryIndex: number;
   entry: number;
-  stop: number;
-  target: number;
+  stop: number; // current (possibly trailed) stop
+  initialStop: number;
+  target: number | null;
   qty: number;
   entryNotional: number;
   entryFee: number;
@@ -97,8 +92,8 @@ export function runBacktest(
   opts: BacktestOptions = {},
 ): BacktestResult {
   const minGrade: SetupGrade = opts.minGrade ?? cfg.minGrade;
-  const warmup = opts.warmup ?? Math.max(cfg.pivotLookback * 2 + 5, 50);
-  const params = setupParamsFromConfig(cfg);
+  const warmup = opts.warmup ?? Math.max(cfg.trendMaPeriod + 12, cfg.pivotLookback * 2 + 5, 50);
+  const strat = getStrategy(cfg);
   const feeRate = cfg.feeRate;
 
   let cash = cfg.startingBalance;
@@ -117,13 +112,13 @@ export function runBacktest(
     const exitFee = exitNotional * feeRate;
     cash += exitNotional - exitFee;
     const pnl = exitNotional - exitFee - position.entryNotional - position.entryFee;
-    const risked = position.qty * (position.entry - position.stop);
+    const risked = position.qty * (position.entry - position.initialStop);
     trades.push({
       entryTime: position.entryTime,
       exitTime,
       entry: position.entry,
       exit: roundPrice(exitPrice),
-      stop: position.stop,
+      stop: position.initialStop,
       target: position.target,
       quantity: position.qty,
       grade: position.grade,
@@ -140,18 +135,25 @@ export function runBacktest(
   for (let i = 0; i < candles.length; i++) {
     const c = candles[i];
 
-    // (1) Manage any open position against this bar's range.
+    // (1) Manage an open position against this bar.
     if (position) {
       if (c.low <= position.stop) {
         closeTrade(position.stop, c.time, i, "stop");
-      } else if (c.high >= position.target) {
+      } else if (position.target != null && c.high >= position.target) {
         closeTrade(position.target, c.time, i, "target");
+      } else if (strat.trailStop) {
+        const ns = strat.trailStop(
+          candles.slice(0, i + 1),
+          { entryTime: position.entryTime, entry: position.entry, stop: position.stop },
+          cfg,
+        );
+        if (ns != null && ns > position.stop) position.stop = ns;
       }
     }
 
     // (2) Look for a new entry (only when flat and past warmup).
     if (!position && i >= warmup && i < candles.length - 1) {
-      const plan = detectSetup(candles.slice(0, i + 1), params);
+      const plan = strat.evaluateEntry(candles.slice(0, i + 1), cfg);
       if (plan && gradeAtLeast(plan.grade, minGrade)) {
         const size = sizePosition({
           equity: cash,
@@ -170,6 +172,7 @@ export function runBacktest(
             entryIndex: i,
             entry: plan.entry,
             stop: plan.stop,
+            initialStop: plan.stop,
             target: plan.target,
             qty: size.quantity,
             entryNotional,
@@ -186,18 +189,18 @@ export function runBacktest(
     equityCurve.push({ time: c.time, equity: round(cash + markValue, 2) });
   }
 
-  // Liquidate any still-open position at the last close for final accounting.
   if (position && candles.length > 0) {
     const last = candles[candles.length - 1];
     closeTrade(last.close, last.time, candles.length - 1, "open");
   }
 
-  return summarise(candles, cfg, feeRate, cash, trades, equityCurve);
+  return summarise(candles, cfg, strat.name, feeRate, cash, trades, equityCurve);
 }
 
 function summarise(
   candles: Candle[],
   cfg: AppConfig,
+  strategyName: string,
   feeRate: number,
   endingCash: number,
   trades: BacktestTrade[],
@@ -209,7 +212,6 @@ function summarise(
   const grossLoss = Math.abs(losses.reduce((s, t) => s + t.pnl, 0));
   const netPnl = endingCash - cfg.startingBalance;
 
-  // Max drawdown over the equity curve.
   let peak = -Infinity;
   let maxDd = 0;
   for (const p of equityCurve) {
@@ -225,6 +227,7 @@ function summarise(
 
   return {
     symbol: cfg.symbol,
+    strategy: strategyName,
     interval: cfg.primaryInterval,
     from: candles[0]?.time ?? 0,
     to: candles[candles.length - 1]?.time ?? 0,

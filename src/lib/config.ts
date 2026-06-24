@@ -8,6 +8,7 @@ import type { SetupGrade } from "./types";
 export type MarketDataSource = "bybit" | "mock";
 export type TradingMode = "paper" | "live";
 export type BybitCategory = "spot" | "linear" | "inverse";
+export type StrategyName = "trend" | "sr";
 
 export interface AppConfig {
   // --- market data ---
@@ -36,7 +37,21 @@ export interface AppConfig {
   /** Halt new entries after losing this fraction of equity in a day. */
   dailyLossLimitPct: number;
 
-  // --- strategy params ---
+  // --- strategy selection ---
+  /** Which strategy to trade: "trend" (default) or "sr". */
+  strategy: StrategyName;
+
+  // --- trend-following params ---
+  /** Breakout lookback: enter above the highest high of this many prior bars. */
+  donchianN: number;
+  /** Long MA period for the trend filter (on the primary timeframe). */
+  trendMaPeriod: number;
+  /** ATR period for stops. */
+  atrPeriod: number;
+  /** Stop distance / trailing distance in ATR multiples. */
+  atrMult: number;
+
+  // --- support/resistance params ---
   /** Bars on each side required to confirm a swing pivot. */
   pivotLookback: number;
   /** Zone clustering width as a fraction of price (0.005 = 0.5%). */
@@ -109,6 +124,12 @@ export function getConfig(): AppConfig {
 
     primaryInterval: str("PRIMARY_INTERVAL", "240"),
     contextInterval: str("CONTEXT_INTERVAL", "D"),
+
+    strategy: str("STRATEGY", "trend") as StrategyName,
+    donchianN: num("DONCHIAN_N", 20),
+    trendMaPeriod: num("TREND_MA_PERIOD", 100),
+    atrPeriod: num("ATR_PERIOD", 14),
+    atrMult: num("ATR_MULT", 3),
 
     startingBalance: num("STARTING_BALANCE", 10_000),
     feeRate: num("FEE_RATE", 0.001),

@@ -94,8 +94,8 @@ export default function PriceChart({
           const lines: Array<[number, string, string]> = [
             [data.plan.entry, "#3b82f6", "entry"],
             [data.plan.stop, "#ea3943", "stop"],
-            [data.plan.target, "#16c784", "target"],
           ];
+          if (data.plan.target != null) lines.push([data.plan.target, "#16c784", "target"]);
           for (const [price, color, title] of lines) {
             priceLines.push(
               series.createPriceLine({ price, color, lineWidth: 2, lineStyle: 0, axisLabelVisible: true, title }),

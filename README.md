@@ -12,11 +12,20 @@ it) trades **real money** — the same strategy code across all three modes.
 
 ## What it does
 
-- **Strategy:** finds horizontal **support/resistance zones** from swing pivots,
-  then takes **A+ long setups** — a confirmed bullish bounce off a strong support
-  zone, with enough headroom to the next resistance for a **2:1 reward:risk**.
-  Spot, **long-only** (buy at support → sell at target or stop). No leverage, no
-  liquidation risk.
+- **Two strategies (pick with `STRATEGY=`):**
+  - **`trend`** (default, recommended) — **breakout + trend filter**: buy when
+    price breaks above the prior *N*-bar high *while in an uptrend* (above a
+    rising long MA), stop at ~3×ATR, and **trail the stop** to let winners run.
+    Best fit for crypto's strong trends and far less fee-sensitive.
+  - **`sr`** (baseline) — horizontal **support/resistance bounce**: buy a
+    confirmed bullish bounce off a strong support zone with a fixed **2:1**
+    target. Mean-reversion; works in ranges, struggles in trends.
+- Both are spot, **long-only** (no leverage, no liquidation), share the same
+  risk engine, and run through the same backtester so you can **compare them on
+  identical history** and let the numbers decide.
+
+> Backtest both before committing: `STRATEGY=trend npm run backtest -- --bars 3000`
+> vs `STRATEGY=sr npm run backtest -- --bars 3000`.
 - **Risk management:** sizes every trade to risk a fixed fraction of equity
   (default **1%**), one position at a time, a **weekly trade cap** (default 3),
   and a **daily-loss circuit breaker** that halts new entries.
