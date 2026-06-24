@@ -164,12 +164,29 @@ scripts/             bot.ts, backtest.ts (CLI entrypoints)
 
 | Command | What |
 | --- | --- |
+| `npm run signal -- 60` | **"what's the trade right now?"** — live price → entry/stop/target sized for a $60 account (read-only, no orders) |
+| `npm run backtest -- trend 8000 A trades` | backtest a window; add `trades` for the full trade log |
+| `npm run sweep -- 8000 A` | parameter-robustness sweep |
 | `npm run dev` | dashboard (dev) at :3000 |
 | `npm run build` / `start` | production build / serve |
-| `npm run bot` | run the bot loop (`-- --once` for a single cycle) |
-| `npm run backtest` | run a backtest (see flags above) |
+| `npm run bot` | run the auto bot loop (`-- --once` for a single cycle) |
 | `npm test` | unit + integration tests (vitest) |
 | `npm run typecheck` | `tsc --noEmit` |
+
+### Daily/weekly workflow (iterating)
+
+The 3-year backtest is only for *validation* — individual trades last ~5 days, so this
+is a "check it every few days" strategy, not a day-trade. A typical loop:
+
+```bash
+npm run signal -- 60                       # is there a trade right now? what's the plan?
+npm run backtest -- trend 1100 A trades    # how has it done over the last ~6 months?
+npm run backtest -- trend 540 A            # ...the last ~3 months?
+```
+
+Tweak `STRATEGY`, `PRIMARY_INTERVAL` (60=1h, 240=4h, D=daily), `RISK_PER_TRADE`,
+`ATR_MULT`, etc. via env vars and re-run. Shorter windows are noisier — use them to
+see *recent behaviour*, not to judge whether the edge is real (that needs the long window).
 
 ## Caveats & honesty
 

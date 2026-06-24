@@ -9,6 +9,7 @@
     "start": "next start",
     "lint": "next lint",
     "bot": "tsx scripts/bot.ts",
+    "signal": "tsx scripts/signal.ts",
     "backtest": "tsx scripts/backtest.ts",
     "sweep": "tsx scripts/sweep.ts",
     "typecheck": "tsc --noEmit",
