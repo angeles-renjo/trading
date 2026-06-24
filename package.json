@@ -10,6 +10,7 @@
     "lint": "next lint",
     "bot": "tsx scripts/bot.ts",
     "backtest": "tsx scripts/backtest.ts",
+    "sweep": "tsx scripts/sweep.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"
