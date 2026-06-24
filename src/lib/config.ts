@@ -129,7 +129,7 @@ export function getConfig(): AppConfig {
     donchianN: num("DONCHIAN_N", 20),
     trendMaPeriod: num("TREND_MA_PERIOD", 100),
     atrPeriod: num("ATR_PERIOD", 14),
-    atrMult: num("ATR_MULT", 3),
+    atrMult: num("ATR_MULT", 4),
 
     startingBalance: num("STARTING_BALANCE", 10_000),
     feeRate: num("FEE_RATE", 0.001),
